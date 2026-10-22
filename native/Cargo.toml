@@ -1,0 +1,26 @@
+[package]
+name = "lispm-gl"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+description = "OpenGL drawn into Emacs 32's canvas images, for lispm-gl"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+bytemuck = "1.25"
+# The canvas's pixels are lent through Emacs 32's module interface, which
+# Emacs 30 and 31 lack: the module refuses to load there.
+emacs = { version = "0.23.0", features = ["emacs-32-experimental"] }
+glow = "0.18"
+libc = "0.2"
+
+# EGL, loaded when a context is made, so that the module links without it.
+[target.'cfg(target_os = "linux")'.dependencies]
+khronos-egl = { version = "6", features = ["dynamic"] }
+libloading = "0.8"
+
+[profile.release]
+opt-level = 3
+lto = "thin"

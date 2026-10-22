@@ -1,0 +1,164 @@
+name: gl module
+
+# lispm-gl's Rust module, built for the computers LispM runs on and, from
+# main, published where lispm-gl-module.el downloads it: the release
+# gl-module-VERSION, VERSION being what `lispm-gl-module-source-version'
+# makes of the sources it is built from.  A version is built and released
+# once, then left as it is; its release is never marked the latest, which
+# stays lispm-gl's own.  lispm-gl keeps a download only when its SHA-256
+# is the one lisp/lispm-gl-module-sums.eld pins, which `make pin' writes
+# from the release, in a commit of its own.
+on:
+  push:
+    branches: [main]
+    paths:
+      - native/**
+      - lisp/lispm-gl-module.el
+      - lisp/lispm-gl-module-sums.eld
+      - .github/workflows/gl-module.yml
+  pull_request:
+    paths:
+      - native/**
+      - lisp/lispm-gl-module.el
+      - lisp/lispm-gl-module-sums.eld
+      - .github/workflows/gl-module.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      published: ${{ steps.version.outputs.published }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: purcell/setup-emacs@v8.0
+        with:
+          version: '31.1'
+      - id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(emacs -Q --batch -L lisp -l lispm-gl-module --eval '(princ (lispm-gl-module-source-version))')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if gh release view "gl-module-$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "gl-module-$version is published already"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+      # What the Lisp pins is what the release holds, when it pins these
+      # sources; between a change of them and the next pin it pins others.
+      - name: Check the pins
+        run: make check-pins
+
+  build:
+    name: ${{ matrix.target }}
+    needs: version
+    # A change of the Emacs Lisp alone leaves the version, and its release,
+    # as they are; a pull request builds all the same, to check the build.
+    if: github.event_name == 'pull_request' || needs.version.outputs.published == 'false'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            suffix: dylib
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            suffix: dylib
+          # The oldest glibc of the runners: its module loads with any newer one.
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            suffix: so
+    env:
+      # The macOS LispM's installer and Emacs's builds support.
+      MACOSX_DEPLOYMENT_TARGET: '11.0'
+      ASSET: lispm-gl-module-${{ matrix.target }}.${{ matrix.suffix }}.gz
+      MODULE: native/target/${{ matrix.target }}/release/liblispm_gl.${{ matrix.suffix }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build
+        run: |
+          rustup target add ${{ matrix.target }}
+          make module TARGET=${{ matrix.target }}
+          file "$MODULE"
+      # It needs the system's libraries only (EGL is opened when a canvas is
+      # made), and on macOS no newer system than LispM supports.
+      - name: Check what it needs
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            otool -L "$MODULE"
+            ! otool -L "$MODULE" | tail -n +2 | grep -v -e '^[[:space:]]*/usr/lib/' -e '^[[:space:]]*/System/' -e 'liblispm_gl'
+          else
+            ldd "$MODULE"
+            ! ldd "$MODULE" | grep -i -e egl -e 'libGL'
+          fi
+      - name: Compress
+        run: |
+          mkdir dist
+          gzip -9 -n -c "$MODULE" > "dist/$ASSET"
+          ls -l dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gl-module-${{ matrix.target }}
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    name: Release
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: gl-module-release
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: purcell/setup-emacs@v8.0
+        with:
+          version: '31.1'
+      # Laid out as the release is, under the URL lispm-gl-module.el derives
+      # from `lispm-gl-module-prebuilt-url'.
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: gl-module-*
+          path: releases/gl-module-${{ needs.version.outputs.version }}
+          merge-multiple: true
+      - name: Checksums
+        working-directory: releases/gl-module-${{ needs.version.outputs.version }}
+        run: |
+          sha256sum lispm-gl-module-* > SHA256SUMS
+          cat SHA256SUMS
+      # Pinned as a release of lispm-gl pins it, from the release laid out
+      # here: the names are the ones Emacs wants, the checksums match.
+      - name: Pin it as a release does
+        run: >-
+          emacs -Q --batch -L lisp -l lispm-gl-module
+          --eval "(setq lispm-gl-module-prebuilt-url \"file://$PWD/releases\")"
+          -f lispm-gl-module-batch-pin
+      - name: Publish
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=gl-module-$VERSION
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "$tag is published already"
+            exit 0
+          fi
+          commit=$(git rev-parse HEAD)
+          gh release create "$tag" releases/"$tag"/* \
+            --target "$commit" --latest=false \
+            --title "OpenGL module $VERSION" \
+            --notes "lispm-gl's module from $commit, for Emacs 32 on macOS (Apple silicon and Intel, 11 and later) and on GNU/Linux on x86_64, compressed with gzip, by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID.
+
+          lispm-gl downloads the one for its computer, and keeps it only when its SHA-256 is the one its Lisp pins in lisp/lispm-gl-module-sums.eld, which \`make pin\` writes from this release: nothing here needs to be fetched by hand."
