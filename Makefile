@@ -8,9 +8,11 @@
 #   make check-pins   check the pins against the release
 
 EMACS ?= emacs
+# lispm-prebuilt, which downloads the module: a checkout beside this one.
+LISPM_PREBUILT ?= ../lispm-prebuilt
 CARGO ?= cargo
 TARGET ?= $(shell rustc -vV | sed -n 's/^host: //p')
-EMACS_BATCH = $(EMACS) -Q --batch -L lisp
+EMACS_BATCH = $(EMACS) -Q --batch -L lisp -L $(LISPM_PREBUILT)
 
 .PHONY: all module test compile pin check-pins clean
 

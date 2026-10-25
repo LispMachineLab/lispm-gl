@@ -4,7 +4,7 @@
 
 ;; Author: Ryan.K
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "30.1"))
+;; Package-Requires: ((emacs "30.1") (lispm-prebuilt "0.1.0"))
 ;; Keywords: multimedia
 ;; URL: https://github.com/LispMachineLab/lispm-gl
 ;; SPDX-License-Identifier: AGPL-3.0-or-later
@@ -261,6 +261,11 @@ to high, between the distances NEAR and FAR."
             0.0 f 0.0 0.0
             0.0 0.0 (/ (+ far near) (- near far)) -1.0
             0.0 0.0 (/ (* 2.0 far near) (- near far)) 0.0)))
+
+;; In an Emacs that can draw, the module comes in the background, so that
+;; the first canvas need not wait for it.
+(when (and (not noninteractive) (lispm-gl-supported-p))
+  (run-with-idle-timer 2 nil #'lispm-gl-module-prefetch))
 
 (provide 'lispm-gl)
 ;;; lispm-gl.el ends here
