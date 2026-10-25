@@ -42,9 +42,14 @@ curl -fsSL https://lispm.ai/install.sh | LISPM_EMACS=32 sh
 ## The module
 
 Nobody has to build it. The one the `gl module` workflow built for your computer from these
-sources is downloaded the first time a canvas is made, and kept only when its SHA-256 is the one
+sources is downloaded in the background once lispm-gl loads in an Emacs that can draw (a canvas
+made before it is there waits for it), and kept only when its SHA-256 is the one
 `lisp/lispm-gl-module-sums.eld` pins; the checksums come with the Lisp, from this repository's
 signed history. Set `lispm-gl-module-source` to `build` to build it with Cargo instead.
+[lispm-prebuilt](https://github.com/LispMachineLab/lispm-prebuilt) does the downloading, in
+[lispm-kernel](https://github.com/LispMachineLab/lispm-kernel) when it runs; LispM's App Store
+installs it with lispm-gl. The Makefile finds a checkout of it beside this one
+(`LISPM_PREBUILT=../lispm-prebuilt`).
 
 ```sh
 make            # build the module for this computer
